@@ -7,39 +7,55 @@ import { socketAuthMiddleware } from "../middleware/socket.auth.middleware.js";
 const app = express();
 const server = http.createServer(app);
 
+/* ---------------- SOCKET SETUP ---------------- */
+
 const io = new Server(server, {
   cors: {
-    origin: [ENV.CLIENT_URL],
+    origin: ENV.CLIENT_URL,
     credentials: true,
   },
 });
 
-// apply authentication middleware to all socket connections
-io.use(socketAuthMiddleware);
+/* ---------------- ONLINE USERS MAP ---------------- */
 
-// we will use this function to check if the user is online or not
+const userSocketMap = {}; // { userId: socketId }
+
+/* ---------------- HELPER FUNCTION ---------------- */
+
 export function getReceiverSocketId(userId) {
   return userSocketMap[userId];
 }
 
-// this is for storig online users
-const userSocketMap = {}; // {userId:socketId}
+/* ---------------- AUTH MIDDLEWARE ---------------- */
+
+io.use(socketAuthMiddleware);
+
+/* ---------------- CONNECTION ---------------- */
 
 io.on("connection", (socket) => {
-  console.log("A user connected", socket.user.fullName);
+  try {
+    const userId = socket.userId;
 
-  const userId = socket.userId;
-  userSocketMap[userId] = socket.id;
+    if (!userId) {
+      console.log("Socket connected without userId ❌");
+      return;
+    }
 
-  // io.emit() is used to send events to all connected clients
-  io.emit("getOnlineUsers", Object.keys(userSocketMap));
+    userSocketMap[userId] = socket.id;
 
-  // with socket.on we listen for events from clients
-  socket.on("disconnect", () => {
-    console.log("A user disconnected", socket.user.fullName);
-    delete userSocketMap[userId];
+    console.log("User connected:", userId);
+
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
-  });
+
+    socket.on("disconnect", () => {
+      console.log("User disconnected:", userId);
+
+      delete userSocketMap[userId];
+      io.emit("getOnlineUsers", Object.keys(userSocketMap));
+    });
+  } catch (err) {
+    console.error("Socket error:", err);
+  }
 });
 
 export { io, app, server };

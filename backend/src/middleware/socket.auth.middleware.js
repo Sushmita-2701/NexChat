@@ -4,40 +4,48 @@ import { ENV } from "../lib/env.js";
 
 export const socketAuthMiddleware = async (socket, next) => {
   try {
-    // extract token from http-only cookies
-    const token = socket.handshake.headers.cookie
-      ?.split("; ")
-      .find((row) => row.startsWith("jwt="))
-      ?.split("=")[1];
+    const cookieHeader = socket.handshake.headers.cookie;
+
+    if (!cookieHeader) {
+      console.log("No cookies in socket handshake");
+      return next(new Error("Unauthorized - No Cookie"));
+    }
+
+    // safer cookie parsing
+    const cookies = Object.fromEntries(
+      cookieHeader.split("; ").map((c) => {
+        const [key, ...v] = c.split("=");
+        return [key, v.join("=")];
+      })
+    );
+
+    const token = cookies.jwt;
 
     if (!token) {
-      console.log("Socket connection rejected: No token provided");
-      return next(new Error("Unauthorized - No Token Provided"));
+      console.log("Socket rejected: No JWT token");
+      return next(new Error("Unauthorized - No Token"));
     }
 
-    // verify the token
+    // verify token
     const decoded = jwt.verify(token, ENV.JWT_SECRET);
-    if (!decoded) {
-      console.log("Socket connection rejected: Invalid token");
-      return next(new Error("Unauthorized - Invalid Token"));
-    }
 
-    // find the user fromdb
+    // find user
     const user = await User.findById(decoded.userId).select("-password");
+
     if (!user) {
-      console.log("Socket connection rejected: User not found");
+      console.log("Socket rejected: User not found");
       return next(new Error("User not found"));
     }
 
-    // attach user info to socket
+    // attach to socket
     socket.user = user;
     socket.userId = user._id.toString();
 
-    console.log(`Socket authenticated for user: ${user.fullName} (${user._id})`);
+    console.log(`Socket auth success: ${user.fullName}`);
 
     next();
   } catch (error) {
-    console.log("Error in socket authentication:", error.message);
+    console.log("Socket auth error:", error.message);
     next(new Error("Unauthorized - Authentication failed"));
   }
 };
